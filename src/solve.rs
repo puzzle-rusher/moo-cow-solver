@@ -44,6 +44,8 @@ pub async fn solve(
     }: BatchAuctionModel,
     slippage_calculator: SlippageCalculator,
 ) -> Result<SettledBatchAuctionModel> {
+    println!("It works");
+    return Ok(Default::default());
     if let Some((index, order_model)) = orders.pop_first() {
         let ref_token = get_ref_token(&tokens).unwrap();
 
