@@ -5,6 +5,7 @@ pub mod solve;
 pub mod token_list;
 pub mod tracing_helper;
 pub mod utils;
+mod settlement_contract_data;
 extern crate serde_derive;
 
 #[macro_use]
