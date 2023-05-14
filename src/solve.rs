@@ -30,6 +30,7 @@ use web3::types::{H160, U256};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 use contracts::ethcontract::Bytes;
 use hex::FromHex;
@@ -53,18 +54,26 @@ pub async fn solve(
     }: BatchAuctionModel,
     slippage_calculator: SlippageCalculator,
 ) -> Result<SettledBatchAuctionModel> {
-    if let Some((index, order_model)) = orders.pop_first() {
+    let token_in = H160::from_str("0x6778ac35e1c9aca22a8d7d820577212a89544df9").unwrap();
+    let token_out = H160::from_str("0xb4fbf271143f4fbf7b91a5ded31805e42b2208d6").unwrap();
+    // println!("{:?}", orders);
+    println!("check");
+    if let Some((index, order_model)) = orders.into_iter().find(|(_, order)| order.sell_token == token_in && order.buy_token == token_out) {
+        let amount_in = U256::from_str_radix("100000000000000000", 10).unwrap();
+        let amount_out = U256::from_str_radix("1000000000000000000", 10).unwrap();
+
         let ref_token = get_ref_token(&tokens).unwrap();
+        println!("in");
 
         let executed_order = ExecutedOrderModel {
-            exec_sell_amount: order_model.sell_amount,
-            exec_buy_amount: order_model.buy_amount,
+            exec_sell_amount: amount_in,
+            exec_buy_amount: amount_out,
         };
         let mut calculated_prices = HashMap::new();
-        let decimals = tokens.get(&ref_token).unwrap().decimals.unwrap();
+        let decimals = tokens.get(&ref_token).unwrap().decimals.expect("decimals is zero");
         let ref_token_price = U256::exp10(decimals as usize);
         calculated_prices.insert(ref_token, ref_token_price);
-        calculate_prices_for_order(&order_model, &mut calculated_prices)?;
+        calculate_prices_for_order(&order_model, amount_in, amount_out, &mut calculated_prices)?;
 
         let approval = ApprovalModel {
             token: order_model.buy_token,
@@ -74,13 +83,13 @@ pub async fn solve(
         let http = Http::new("https://eth-goerli.public.blastapi.io").unwrap();
         let web3 = Web3::new(http);
         let settlement_contract_order = Order {
-            token_in: order_model.sell_token,
-            amount_in: order_model.sell_amount,
-            token_out: order_model.buy_token,
-            amount_out: order_model.buy_amount,
-            valid_to: Default::default(),
-            maker: Default::default(),
-            uid: Bytes::default(),
+            token_in,
+            amount_in,
+            token_out,
+            amount_out,
+            valid_to: U256::from(1747179215),
+            maker: H160::from_str("d1f5c19d7330F333F28A5CF3F391Bf679aC55841").unwrap(),
+            uid: Bytes("0x1".as_bytes().to_owned()),
         };
 
         let signature = Vec::from_hex("3abc237d82f04aabe1317ff7b49b81c94cfa13f19658db60216bfde86085e41027150537c6ff482e73b30c0213c605e8267676a8e77791627c4a8744fdf8435d1c").unwrap();
@@ -97,12 +106,12 @@ pub async fn solve(
             call_data: encoded.2.0.clone(),
             exec_plan: Default::default(),
             inputs: vec![TokenAmount {
-                amount: order_model.sell_amount,
+                amount: amount_in,
                 token: order_model.sell_token,
             }],
             outputs: vec![
                 TokenAmount {
-                    amount: order_model.buy_amount,
+                    amount: amount_out,
                     token: order_model.buy_token,
                 }
             ],
@@ -121,171 +130,6 @@ pub async fn solve(
     } else {
         Ok(SettledBatchAuctionModel::default())
     }
-
-    // tracing::info!(
-    //     "Before filtering: Solving instance with the orders {:?} and the tokens: {:?}",
-    //     orders,
-    //     tokens
-    // );
-    // let external_prices: HashMap<_, _> = tokens
-    //     .iter()
-    //     .filter_map(|(address, model)| Some((*address, model.external_price?)))
-    //     .collect();
-    // let slippage_context = SlippageContext {
-    //     prices: &external_prices,
-    //     calculator: &slippage_calculator,
-    // };
-    //
-    // let api_key = env::var("ZEROEX_API_KEY").map(Some).unwrap_or(None);
-    // if orders.is_empty() {
-    //     return Ok(SettledBatchAuctionModel::default());
-    // }
-    //
-    // let mut orders: Vec<(usize, OrderModel)> = orders.into_iter().collect();
-    // // Filter out zero fee orders, as CowDexSolver is not good at matching liquidity orders.
-    // // Also they increase the revert risk, as Market Maker orders - at least the ones from zeroEx - can timing out and then cause simulation errors.
-    // orders.retain(|(_, order)| !is_zero_fee_order(order.clone()));
-    //
-    // // If there are many orders in the batch, we filter the ones that don't have a promising limit price (according to external prices)
-    // if orders.len() > 4usize {
-    //     orders.retain(|(_, order)| is_market_order(&tokens, order.clone()).unwrap_or(false));
-    // }
-    //
-    // // For simplicity, only solve for up to 10 orders
-    // orders.truncate(10);
-    //
-    // tracing::info!(
-    //     "After filtering: Solving instance with the orders {:?} and the tokens: {:?}",
-    //     orders,
-    //     tokens
-    // );
-    //
-    // // Step1: get splitted trade amounts per token pair for each order via paraswap dex-ag
-    // let (matched_orders, single_trade_results) =
-    //     get_matchable_orders_and_subtrades(orders.clone(), tokens.clone()).await;
-    // tracing::debug!("single_trade_results: {:?}", single_trade_results);
-    // let contains_cow = contain_cow(&single_trade_results);
-    // for sub_trade in single_trade_results.iter() {
-    //     tracing::debug!(
-    //         " Before cow merge: trade on pair {:?} with values {:?}",
-    //         (sub_trade.src_token, sub_trade.dest_token),
-    //         (sub_trade.src_amount, sub_trade.dest_amount)
-    //     );
-    // }
-    //
-    // // 2nd step: Removing obvious cow volume from splitted traded amounts, by matching opposite volume
-    // let ((matched_orders, mut swap_results), splitted_trade_amounts) = match contains_cow {
-    //     true => {
-    //         tracing::info!("Found cow and trying to solve it");
-    //
-    //         let splitted_trade_amounts =
-    //             get_splitted_trade_amounts_from_trading_vec(single_trade_results);
-    //         // if there is a cow volume, we try to remove it
-    //         let updated_traded_amounts =
-    //             match get_trade_amounts_without_cow_volumes(&splitted_trade_amounts) {
-    //                 Ok(traded_amounts) => traded_amounts,
-    //                 Err(err) => {
-    //                     tracing::debug!(
-    //                         "Error from zeroEx api for trade amounts without cows: {:?}",
-    //                         err
-    //                     );
-    //                     return Ok(SettledBatchAuctionModel::default());
-    //                 }
-    //             };
-    //
-    //         for (pair, entry_amounts) in &updated_traded_amounts {
-    //             tracing::debug!(
-    //                 " After cow merge: trade on pair {:?} with values {:?}",
-    //                 pair,
-    //                 entry_amounts,
-    //             );
-    //         }
-    //
-    //         // 3rd step: Get trades from zeroEx of left-over amounts
-    //         let swap_results = match get_swaps_for_left_over_amounts(
-    //             updated_traded_amounts,
-    //             &slippage_context,
-    //             api_key,
-    //         )
-    //         .await
-    //         {
-    //             Ok(swap_results) => swap_results,
-    //             Err(err) => {
-    //                 tracing::debug!(
-    //                     "Error from zeroEx api for trading left over amounts: {:?}",
-    //                     err
-    //                 );
-    //                 return Ok(SettledBatchAuctionModel::default());
-    //             }
-    //         };
-    //         ((matched_orders, swap_results), splitted_trade_amounts)
-    //     }
-    //     false => {
-    //         tracing::info!("Falling back to normal zeroEx solver");
-    //
-    //         let zero_ex_results =
-    //             match get_swaps_for_orders_from_zeroex(orders, &slippage_context, api_key).await {
-    //                 Ok(zero_ex_results) => zero_ex_results,
-    //                 Err(err) => {
-    //                     tracing::debug!(
-    //                         "Error while calling zeroEx api in fallback mode: {:?}",
-    //                         err
-    //                     );
-    //                     return Ok(SettledBatchAuctionModel::default());
-    //                 }
-    //             };
-    //         (zero_ex_results.into_iter().unzip(), HashMap::new())
-    //     }
-    // };
-    //
-    // // 4th step: Build settlements with price and interactions
-    // let mut solution = SettledBatchAuctionModel::default();
-    // let tradable_buffer_token_list = get_buffer_tradable_token_list();
-    // while let Some((query, swap)) = swap_results.pop() {
-    //     match solution.insert_new_price(
-    //         &splitted_trade_amounts,
-    //         query.clone(),
-    //         swap.clone(),
-    //         &tokens,
-    //     ) {
-    //         Ok(()) => {}
-    //         Err(err) => {
-    //             tracing::debug!(
-    //                 "Inserting a price failed due to {:?}, returning trivial solution",
-    //                 err
-    //             );
-    //             return Ok(SettledBatchAuctionModel::default());
-    //         }
-    //     }
-    //     let swap_interaction_data =
-    //         build_payload_for_swap(&swap, &query, &mut tokens, &tradable_buffer_token_list)?;
-    //     // We will always push all approvals, the driver will filter out the unnecessary ones
-    //     solution.approvals.push(build_approval(&swap, &query));
-    //     solution.interaction_data.push(swap_interaction_data);
-    //     // Sort swap_results in such a way that the next pop contains a token already processed in the clearing prices, if there exists one.
-    //     swap_results.sort_by(|a, b| {
-    //         one_token_is_already_in_settlement(&solution, a)
-    //             .cmp(&one_token_is_already_in_settlement(&solution, b))
-    //     })
-    // }
-    //
-    // // 5th step: Update execution plan coordinates once we have all plans prepared
-    // for (position, plan) in solution.interaction_data.iter_mut().enumerate() {
-    //     plan.exec_plan.coordinates.position = position as u32;
-    // }
-    //
-    // // 6th step: Insert traded orders into settlement
-    // for (i, order) in matched_orders {
-    //     solution.orders.insert(
-    //         i,
-    //         ExecutedOrderModel {
-    //             exec_sell_amount: order.sell_amount,
-    //             exec_buy_amount: order.buy_amount,
-    //         },
-    //     );
-    // }
-    // tracing::info!("Found solution: {:?}", solution);
-    // Ok(solution)
 }
 
 fn get_ref_token(tokens: &BTreeMap<H160, TokenInfoModel>) -> Option<H160> {
@@ -305,7 +149,7 @@ fn get_ref_token(tokens: &BTreeMap<H160, TokenInfoModel>) -> Option<H160> {
         .cloned()
 }
 
-fn calculate_prices_for_order(order: &OrderModel, prices: &mut HashMap<H160, U256>) -> Result<()>  {
+fn calculate_prices_for_order(order: &OrderModel, sell_amount: U256, buy_amount: U256, prices: &mut HashMap<H160, U256>) -> Result<()>  {
     match (
         prices.get(&order.sell_token),
         prices.get(&order.buy_token),
@@ -314,9 +158,9 @@ fn calculate_prices_for_order(order: &OrderModel, prices: &mut HashMap<H160, U25
             prices.insert(
                 order.buy_token,
                 price_sell_token
-                    .checked_mul(order.sell_amount)
+                    .checked_mul(sell_amount)
                     .unwrap()
-                    .checked_div(order.buy_amount)
+                    .checked_div(buy_amount)
                     .unwrap(),
             );
         }
@@ -324,9 +168,9 @@ fn calculate_prices_for_order(order: &OrderModel, prices: &mut HashMap<H160, U25
             prices.insert(
                 order.sell_token,
                 price_buy_token
-                    .checked_mul(order.buy_amount)
+                    .checked_mul(buy_amount)
                     .unwrap()
-                    .checked_div(order.sell_amount)
+                    .checked_div(sell_amount)
                     .unwrap(),
             );
         }
