@@ -9,8 +9,8 @@ use derivative::Derivative;
 use num::bigint::{BigInt, Sign};
 use num::rational::Ratio;
 use num::BigRational;
-use primitive_types::H160;
-use primitive_types::U256;
+use web3::types::H160;
+use web3::types::U256;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::HashSet;
@@ -236,127 +236,7 @@ impl SettledBatchAuctionModel {
         swap: SwapResponse,
         tokens: &BTreeMap<H160, TokenInfoModel>,
     ) -> Result<()> {
-        let src_token = query.sell_token;
-        let dest_token = query.buy_token;
-        let (sell_amount, buy_amount) = match (
-            splitted_trade_amounts.get(&(src_token, dest_token)),
-            splitted_trade_amounts.get(&(dest_token, src_token)),
-        ) {
-            (Some((_sell_amount, _)), Some((buy_amount, substracted_sell_amount))) => {
-                (*substracted_sell_amount, *buy_amount)
-            }
-            (Some((_, _)), None) => (U256::zero(), U256::zero()),
-            (None, Some((_, _))) => (U256::zero(), U256::zero()),
-            (None, None) => (U256::zero(), U256::zero()),
-        };
-        let (sell_amount, buy_amount) = (
-            sell_amount.checked_add(swap.sell_amount).unwrap(),
-            buy_amount.checked_add(swap.buy_amount).unwrap(),
-        );
-
-        match (
-            self.prices.clone().get(&src_token),
-            self.prices.clone().get(&dest_token),
-        ) {
-            (Some(_), Some(_)) => return Err(anyhow!("can't deal with such a ring")),
-            (Some(price_sell_token), None) => {
-                self.prices.insert(
-                    query.buy_token,
-                    price_sell_token
-                        .checked_mul(sell_amount)
-                        .unwrap()
-                        .checked_div(buy_amount)
-                        .unwrap(),
-                );
-            }
-            (None, Some(price_buy_token)) => {
-                self.prices.insert(
-                    query.sell_token,
-                    price_buy_token
-                        .checked_mul(buy_amount)
-                        .unwrap()
-                        .checked_div(sell_amount)
-                        .unwrap(),
-                );
-            }
-            (None, None) => {
-                if self.prices.is_empty() {
-                    self.prices.insert(
-                        query.sell_token,
-                        buy_amount.checked_mul(U256::from(SCALING_FACTOR)).unwrap(),
-                    );
-                    self.prices.insert(
-                        query.buy_token,
-                        sell_amount.checked_mul(U256::from(SCALING_FACTOR)).unwrap(),
-                    );
-                } else {
-                    // If there are independent trades, e.g. DAI -> USDC AND ETH -> GNO, the prices between
-                    // DAI and GNO still need to satisfy the price check in the driver. Hence, the prices of unrelated trades
-                    // still needs to consider the external prices provided for the auction for the setting of the new price
-                    for (token, token_price) in self.prices.iter() {
-                        match (
-                            tokens
-                                .get(token)
-                                .unwrap_or(&TokenInfoModel::default())
-                                .external_price,
-                            tokens
-                                .get(&query.sell_token)
-                                .unwrap_or(&TokenInfoModel::default())
-                                .external_price,
-                            tokens
-                                .get(&query.buy_token)
-                                .unwrap_or(&TokenInfoModel::default())
-                                .external_price,
-                        ) {
-                            (Some(token_external_price), Some(sell_token_external_price), _) => {
-                                if let Some(price_ratio) = Ratio::from_float(
-                                    sell_token_external_price / token_external_price,
-                                ) {
-                                    if let Some(sell_token_price) = bigint_to_u256(
-                                        &token_price
-                                            .to_big_rational()
-                                            .mul(&price_ratio)
-                                            .to_integer(),
-                                    ) {
-                                        let buy_token_price = sell_token_price
-                                            .checked_mul(sell_amount)
-                                            .unwrap()
-                                            .checked_div(buy_amount)
-                                            .unwrap();
-                                        self.prices.insert(query.sell_token, sell_token_price);
-                                        self.prices.insert(query.buy_token, buy_token_price);
-                                        break;
-                                    }
-                                }
-                            }
-                            (Some(token_external_price), _, Some(buy_token_external_price)) => {
-                                if let Some(price_ratio) = Ratio::from_float(
-                                    buy_token_external_price / token_external_price,
-                                ) {
-                                    if let Some(buy_token_price) = bigint_to_u256(
-                                        &token_price
-                                            .to_big_rational()
-                                            .mul(&price_ratio)
-                                            .to_integer(),
-                                    ) {
-                                        let sell_token_price = buy_token_price
-                                            .checked_mul(buy_amount)
-                                            .unwrap()
-                                            .checked_div(sell_amount)
-                                            .unwrap();
-                                        self.prices.insert(query.buy_token, buy_token_price);
-                                        self.prices.insert(query.sell_token, sell_token_price);
-                                        break;
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
+        unimplemented!();
     }
 }
 

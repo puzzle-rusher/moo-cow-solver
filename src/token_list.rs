@@ -1,5 +1,5 @@
 use crate::utils::h160_hexadecimal;
-use ethcontract::Address;
+use web3::types::H160;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 
@@ -31,6 +31,6 @@ pub struct BufferTradingTokenList {
 #[serde(rename_all = "camelCase")]
 pub struct Token {
     #[serde(with = "h160_hexadecimal")]
-    pub address: Address,
+    pub address: H160,
     pub chain_id: u64,
 }

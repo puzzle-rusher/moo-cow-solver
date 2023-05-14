@@ -2,7 +2,7 @@ use crate::utils::h160_hexadecimal;
 use crate::utils::u256_decimal;
 use anyhow::Result;
 use derivative::Derivative;
-use primitive_types::{H160, U256};
+use web3::types::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;

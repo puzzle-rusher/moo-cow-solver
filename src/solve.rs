@@ -1,6 +1,7 @@
 mod paraswap_solver;
 mod solver_utils;
 pub mod zeroex_solver;
+use ethabi::{encode, ParamType, Token as EthToken};
 use crate::models::batch_auction_model::ApprovalModel;
 use crate::models::batch_auction_model::ExecutedOrderModel;
 use crate::models::batch_auction_model::InteractionData;
@@ -16,6 +17,7 @@ use crate::token_list::get_buffer_tradable_token_list;
 use crate::token_list::BufferTradingTokenList;
 use crate::token_list::Token;
 use crate::settlement_contract_data::Order;
+use contracts::MooSettlementContract;
 
 use self::paraswap_solver::get_sub_trades_from_paraswap_price_response;
 use crate::solve::paraswap_solver::api::Root;
@@ -24,11 +26,18 @@ use crate::solve::zeroex_solver::api::SwapResponse;
 use crate::solve::zeroex_solver::ZeroExSolver;
 use anyhow::{anyhow, Result};
 use futures::future::join_all;
-use primitive_types::{H160, U256};
+use web3::types::{H160, U256};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
+use contracts::ethcontract::Bytes;
+use hex::FromHex;
+use web3::signing::Key;
+use web3::transports::Http;
+use web3::Web3;
+use crate::interactions::Interaction;
+use crate::interactions::settlement_contract::MooSettlementInteraction;
 
 ethcontract::contract!("contracts/artifacts/ERC20.json");
 
@@ -44,8 +53,6 @@ pub async fn solve(
     }: BatchAuctionModel,
     slippage_calculator: SlippageCalculator,
 ) -> Result<SettledBatchAuctionModel> {
-    println!("It works");
-    return Ok(Default::default());
     if let Some((index, order_model)) = orders.pop_first() {
         let ref_token = get_ref_token(&tokens).unwrap();
 
@@ -64,27 +71,30 @@ pub async fn solve(
             spender: Default::default(), // during hack
             amount: order_model.buy_amount,
         };
-
+        let http = Http::new("https://eth-goerli.public.blastapi.io").unwrap();
+        let web3 = Web3::new(http);
         let settlement_contract_order = Order {
-            // usdc_in: order_model.sell_amount,
-            // weth_out: order_model.buy_amount,
-            // validto: Default::default(), // tolya
-            // solver: Default::default(), // tolya
-            // nonce: Default::default(), // tolya
-            // signature: vec![], // tolya
-            token_in: Default::default(),
-            amount_in: Default::default(),
-            token_out: Default::default(),
-            amount_out: Default::default(),
+            token_in: order_model.sell_token,
+            amount_in: order_model.sell_amount,
+            token_out: order_model.buy_token,
+            amount_out: order_model.buy_amount,
             valid_to: Default::default(),
             maker: Default::default(),
-            uid: vec![],
+            uid: Bytes::default(),
         };
 
+        let signature = Vec::from_hex("3abc237d82f04aabe1317ff7b49b81c94cfa13f19658db60216bfde86085e41027150537c6ff482e73b30c0213c605e8267676a8e77791627c4a8744fdf8435d1c").unwrap();
+        let interaction = MooSettlementInteraction {
+            order: settlement_contract_order,
+            signature: signature.into(),
+            moo: MooSettlementContract::deployed(&web3).await.unwrap(),
+        }.encode();
+
+        let encoded = interaction.first().unwrap();
         let interaction_data = InteractionData {
-            target: Default::default(), // during hack
+            target: encoded.0, // during hack
             value: U256::zero(),
-            call_data: settlement_contract_order.to_bytes()?,
+            call_data: encoded.2.0.clone(),
             exec_plan: Default::default(),
             inputs: vec![TokenAmount {
                 amount: order_model.sell_amount,
@@ -331,15 +341,11 @@ fn calculate_prices_for_order(order: &OrderModel, prices: &mut HashMap<H160, U25
 pub fn swap_respects_limit_price(swap: &SwapResponse, order: &OrderModel) -> bool {
     // note: This would be different for partially fillable orders but OrderModel does currently not
     // contain the remaining fill amount.
-    swap.sell_amount <= order.sell_amount && swap.buy_amount >= order.buy_amount
+    unimplemented!();
 }
 
 fn build_approval(swap: &SwapResponse, query: &SwapQuery) -> ApprovalModel {
-    ApprovalModel {
-        token: query.sell_token,
-        spender: swap.allowance_target,
-        amount: swap.sell_amount,
-    }
+    unimplemented!();
 }
 
 fn build_payload_for_swap(
@@ -348,48 +354,7 @@ fn build_payload_for_swap(
     tokens: &mut BTreeMap<H160, TokenInfoModel>,
     tradable_buffer_token_list: &BufferTradingTokenList,
 ) -> Result<InteractionData> {
-    let available_buffer = tokens
-        .clone()
-        .get(&query.buy_token)
-        .unwrap_or(&TokenInfoModel::default())
-        .internal_buffer
-        .unwrap_or_else(U256::zero);
-    let mut swap_interaction_data = {
-        InteractionData {
-            target: swap.to,
-            value: swap.value,
-            call_data: swap.data.0.clone(),
-            exec_plan: Default::default(),
-            inputs: vec![TokenAmount {
-                token: query.sell_token,
-                amount: swap.sell_amount,
-            }],
-            outputs: vec![TokenAmount {
-                token: query.buy_token,
-                amount: swap.buy_amount,
-            }],
-        }
-    };
-
-    if swap.buy_amount < available_buffer
-        && swap_tokens_are_tradable_buffer_tokens(query, tradable_buffer_token_list)
-    {
-        // Trade against internal buffer
-        swap_interaction_data.exec_plan.internal = true;
-
-        // Adjust buffer balances
-        if let Some(mut token_info) = tokens.get_mut(&query.buy_token) {
-            token_info.internal_buffer = available_buffer.checked_sub(swap.buy_amount);
-        }
-        if let Some(mut token_info) = tokens.get_mut(&query.sell_token) {
-            if let Some(buffer) = token_info.internal_buffer {
-                token_info.internal_buffer = buffer.checked_add(swap.sell_amount);
-            } else {
-                token_info.internal_buffer = Some(swap.sell_amount);
-            }
-        }
-    }
-    Ok(swap_interaction_data)
+    unimplemented!();
 }
 
 fn is_zero_fee_order(order: OrderModel) -> bool {
@@ -422,69 +387,7 @@ async fn get_swaps_for_orders_from_zeroex(
     slippage_context: &SlippageContext<'_>,
     api_key: Option<String>,
 ) -> Result<Vec<((usize, OrderModel), (SwapQuery, SwapResponse))>> {
-    let zeroex_futures = orders
-        .into_iter()
-        .filter(|(_, x)| !x.is_liquidity_order)
-        .map(|(index, order)| {
-            let slippage = slippage_context
-                .relative_for_order(&order)
-                .unwrap_or(FALLBACK_SLIPPAGE);
-            let cloned_api_key = api_key.clone();
-            async move {
-                let client = reqwest::ClientBuilder::new()
-                    .timeout(Duration::new(5, 0))
-                    .user_agent("gp-v2-services/2.0.0")
-                    .build()
-                    .unwrap();
-                let zeroex_solver =
-                    ZeroExSolver::new(1u64, cloned_api_key, client.clone()).unwrap();
-
-                let query = match order.is_sell_order {
-                    true => SwapQuery {
-                        sell_token: order.sell_token,
-                        buy_token: order.buy_token,
-                        sell_amount: Some(order.sell_amount),
-                        buy_amount: None,
-                        // 0x slippage is a factor, not percentage (the name is misleading: https://docs.0x.org/0x-api-swap/guides/troubleshooting-0x-api-swaps#slippage-tolerance)
-                        slippage_percentage: slippage.as_factor(),
-                        skip_validation: Some(true),
-                    },
-                    false => SwapQuery {
-                        sell_token: order.sell_token,
-                        buy_token: order.buy_token,
-                        sell_amount: None,
-                        buy_amount: Some(order.buy_amount),
-                        // 0x slippage is a factor, not percentage (the name is misleading: https://docs.0x.org/0x-api-swap/guides/troubleshooting-0x-api-swaps#slippage-tolerance)
-                        slippage_percentage: slippage.as_factor(),
-                        skip_validation: Some(true),
-                    },
-                };
-                (
-                    index,
-                    order,
-                    query.clone(),
-                    zeroex_solver.client.get_swap(query).await,
-                )
-            }
-        });
-    let swap_results = join_all(zeroex_futures).await;
-    swap_results
-        .iter()
-        .map(|(index, order, query, swap)| match swap {
-            Ok(swap) => {
-                if !swap_respects_limit_price(swap, order) {
-                    return Err(anyhow!("swap price not good enough"));
-                }
-                Ok(((*index, order.clone()), (query.clone(), swap.clone())))
-            }
-            Err(err) => Err(anyhow!("error from zeroex:{:?}", err)),
-        })
-        .filter(|x| {
-            x.is_ok()
-                || (format!("{:?}", x).contains("error from zeroex")
-                    && !format!("{:?}", x).contains("TimedOut"))
-        })
-        .collect()
+    unimplemented!();
 }
 
 async fn get_swaps_for_left_over_amounts(
@@ -492,118 +395,14 @@ async fn get_swaps_for_left_over_amounts(
     slippage_context: &SlippageContext<'_>,
     api_key: Option<String>,
 ) -> Result<Vec<(SwapQuery, SwapResponse)>> {
-    let zeroex_futures = updated_traded_amounts
-        .into_iter()
-        .map(|(pair, trade_amount)| {
-            let cloned_api_key = api_key.clone();
-            async move {
-                let client = reqwest::ClientBuilder::new()
-                    .timeout(Duration::new(3, 0))
-                    .user_agent("gp-v2-services/2.0.0")
-                    .build()
-                    .unwrap();
-                let zeroex_solver =
-                    ZeroExSolver::new(1u64, cloned_api_key, client.clone()).unwrap();
-
-                let (src_token, dest_token) = pair;
-                let query = SwapQuery {
-                    sell_token: src_token,
-                    buy_token: dest_token,
-                    sell_amount: Some(trade_amount.sell_amount),
-                    buy_amount: None,
-                    // 0x slippage is a factor, not percentage (the name is misleading: https://docs.0x.org/0x-api-swap/guides/troubleshooting-0x-api-swaps#slippage-tolerance)
-                    slippage_percentage: slippage_context
-                        .relative(src_token, trade_amount.sell_amount)
-                        .unwrap_or(FALLBACK_SLIPPAGE)
-                        .as_factor(),
-                    skip_validation: Some(true),
-                };
-                (
-                    trade_amount,
-                    query.clone(),
-                    zeroex_solver.client.get_swap(query).await,
-                )
-            }
-        });
-    let swap_results = join_all(zeroex_futures).await;
-    swap_results
-        .iter()
-        .map(|(trade_amount, query, swap)| match swap {
-            Ok(swap) => {
-                if trade_amount.must_satisfy_limit_price
-                    && swap
-                        .sell_amount
-                        .checked_mul(trade_amount.buy_amount)
-                        .gt(&trade_amount.sell_amount.checked_mul(swap.buy_amount))
-                {
-                    return Err(anyhow!("swap price not good enough"));
-                }
-                Ok((query.clone(), swap.clone()))
-            }
-            Err(err) => Err(anyhow!("error from zeroex:{:?}", err)),
-        })
-        .filter(|x| x.is_ok() || format!("{:?}", x).contains("error from zeroex"))
-        .collect()
-}
-
-async fn get_matchable_orders_and_subtrades(
-    orders: Vec<(usize, OrderModel)>,
-    tokens: BTreeMap<H160, TokenInfoModel>,
-) -> (Vec<(usize, OrderModel)>, Vec<SubTrade>) {
-    let mut paraswap_futures = Vec::new();
-    let client = reqwest::ClientBuilder::new()
-        .timeout(Duration::new(5, 0))
-        .user_agent("gp-v2-services/2.0.0")
-        .build()
-        .unwrap();
-
-    for (i, order) in orders.iter() {
-        let paraswap_solver =
-            ParaswapSolver::new(vec![String::from("ParaSwapPool4")], client.clone());
-
-        paraswap_futures.push(get_paraswap_sub_trades_from_order(
-            *i,
-            paraswap_solver,
-            order,
-            tokens.clone(),
-        ));
-    }
-    type OrdersAndSubTrades = (Vec<(usize, OrderModel)>, Vec<SubTrade>);
-    // In the following, we use the sequential evaluation, as otherwise paraswap will return errors.
-    // let awaited_paraswap_futures: Result<OrdersAndSubTradesVector, anyhow::Error> =
-    //     join_all(paraswap_futures).await.into_iter().collect();
-    let mut awaited_paraswap_futures: Vec<Result<OrdersAndSubTrades>> = Vec::new();
-    for future in paraswap_futures {
-        awaited_paraswap_futures.push(future.await);
-    }
-    let awaited_paraswap_futures: Result<Vec<OrdersAndSubTrades>, anyhow::Error> =
-        awaited_paraswap_futures.into_iter().collect();
-    type MatchedOrderBracket = (Vec<Vec<(usize, OrderModel)>>, Vec<Vec<SubTrade>>);
-    let (matched_orders, single_trade_results): MatchedOrderBracket;
-    if let Ok(paraswap_futures_results) = awaited_paraswap_futures {
-        let paraswap_future_results_unzipped = paraswap_futures_results.into_iter().unzip();
-        matched_orders = paraswap_future_results_unzipped.0;
-        single_trade_results = paraswap_future_results_unzipped.1;
-    } else {
-        return (Vec::new(), Vec::new());
-    }
-    let matched_orders: Vec<(usize, OrderModel)> = matched_orders.into_iter().flatten().collect();
-
-    let single_trade_results: Vec<SubTrade> = single_trade_results.into_iter().flatten().collect();
-    (matched_orders, single_trade_results)
+    unimplemented!();
 }
 
 fn swap_tokens_are_tradable_buffer_tokens(
     query: &SwapQuery,
     tradable_buffer_token_list: &BufferTradingTokenList,
 ) -> bool {
-    tradable_buffer_token_list.tokens.contains(&Token {
-        address: query.sell_token,
-        chain_id: 1u64,
-    }) && tradable_buffer_token_list.tokens.contains(&Token {
-        address: query.buy_token,
-        chain_id: 1u64,
-    })
+    unimplemented!();
 }
 
 #[derive(Clone, Debug)]

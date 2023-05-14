@@ -8,7 +8,7 @@ use crate::solve::solver_utils::deserialize_decimal_f64;
 use crate::utils::u256_decimal;
 use anyhow::Result;
 use derivative::Derivative;
-use primitive_types::{H160, U256};
+use web3::types::{H160, U256};
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::time::Duration;

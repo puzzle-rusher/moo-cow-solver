@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use num::{bigint::Sign, rational::Ratio, BigInt, BigRational, ToPrimitive as _, Zero as _};
-use primitive_types::U256;
+use web3::types::U256;
 
 pub fn big_rational_to_float(ratio: &BigRational) -> Option<f64> {
     Some(ratio.numer().to_f64()? / ratio.denom().to_f64()?)

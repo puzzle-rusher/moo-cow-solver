@@ -1,4 +1,4 @@
-use primitive_types::H160;
+use web3::types::H160;
 use serde::{de, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
 use std::fmt;

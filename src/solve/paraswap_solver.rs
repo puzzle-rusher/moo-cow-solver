@@ -44,49 +44,13 @@ impl ParaswapSolver {
         order: &OrderModel,
         tokens: BTreeMap<primitive_types::H160, TokenInfoModel>,
     ) -> Result<(Root, U256)> {
-        let (amount, side) = match order.is_sell_order {
-            false => (order.buy_amount, Side::Buy),
-            true => (order.sell_amount, Side::Sell),
-        };
-        let price_query = PriceQuery {
-            src_token: order.sell_token,
-            dest_token: order.buy_token,
-            src_decimals: tokens
-                .get(&order.sell_token)
-                .ok_or_else(|| anyhow!("Instance error: tokenlist did not contain all tokens"))?
-                .decimals
-                .unwrap_or(18u8) as usize,
-            dest_decimals: tokens
-                .get(&order.buy_token)
-                .ok_or_else(|| anyhow!("Instance error: tokenlist did not contain all tokens"))?
-                .decimals
-                .unwrap_or(18u8) as usize,
-            amount,
-            side,
-            exclude_dexs: Some(self.disabled_paraswap_dexs.clone()),
-        };
-        let price_response = self.client.get_full_price_info(price_query).await?;
-        Ok((price_response, amount))
+        unimplemented!();
     }
 }
 
 pub fn get_sub_trades_from_paraswap_price_response(best_routes: Vec<BestRoute>) -> Vec<SubTrade> {
-    let mut sub_trades = Vec::new();
-    for routes in best_routes {
-        for swap in routes.swaps {
-            for trade in &swap.swap_exchanges {
-                let src_token = overwrite_eth_with_weth_token(swap.src_token);
-                let dest_token = overwrite_eth_with_weth_token(swap.dest_token);
-                sub_trades.push(SubTrade {
-                    src_token,
-                    dest_token,
-                    src_amount: trade.src_amount,
-                    dest_amount: trade.dest_amount,
-                });
-            }
-        }
-    }
-    sub_trades
+    unimplemented!();
+
 }
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,7 @@
 //! Module defining slippage computation for DEX liquidiy.
 
 use anyhow::{Context as _, Result};
-use ethcontract::{H160, U256};
+use web3::types::{H160, U256};
 use num::{BigInt, BigRational, CheckedDiv as _, Integer as _, ToPrimitive as _};
 use std::{borrow::Cow, cmp, collections::HashMap};
 
@@ -33,7 +33,7 @@ impl<'a> SlippageContext<'a> {
             true => (order.sell_token, order.sell_amount),
             false => (order.buy_token, order.buy_amount),
         };
-        self.relative(token, amount)
+        self.relative(token.into(), amount.into())
     }
 
     /// Computes the relative slippage for a token and amount.
