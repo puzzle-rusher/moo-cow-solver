@@ -15,6 +15,8 @@ use warp::{
     reply::{self, json, with_status, Json, WithStatus},
     Filter, Rejection, Reply,
 };
+use web3::transports::Http;
+use web3::Web3;
 
 /// Wraps H160 with FromStr and Deserialize that can handle a `0x` prefix.
 #[derive(Deserialize)]
@@ -69,11 +71,13 @@ pub fn convert_get_solve_error_to_reply(err: anyhow::Error) -> WithStatus<Json> 
 
 pub fn get_solve(
     slippage_calculator: SlippageCalculator,
+    web3: Web3<Http>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     get_solve_request().and_then(move |model| {
         let slippage_calculator = slippage_calculator.clone();
+        let web3 = web3.clone();
         async move {
-            let result = solve::solve(model, slippage_calculator).await;
+            let result = solve::solve(model, slippage_calculator, web3).await;
             Result::<_, Infallible>::Ok(get_solve_response(result))
         }
     })

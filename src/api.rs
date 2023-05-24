@@ -1,13 +1,16 @@
 mod solve;
 use std::convert::Infallible;
 use warp::{hyper::StatusCode, Filter, Rejection, Reply};
+use web3::transports::Http;
+use web3::Web3;
 
 use crate::slippage::SlippageCalculator;
 
 pub fn handle_all_routes(
     slippage_calculator: SlippageCalculator,
+    web3: Web3<Http>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let solve = solve::get_solve(slippage_calculator);
+    let solve = solve::get_solve(slippage_calculator, web3);
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])

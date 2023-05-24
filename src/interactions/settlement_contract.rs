@@ -1,7 +1,7 @@
 use {
     // contracts::IZeroEx,
     contracts::MooSettlementContract,
-    crate::settlement_contract_data::Order,
+    crate::models::settlement_contract_data::Order,
     web3::types::Bytes,
 };
 use crate::interactions::{EncodedInteraction, Interaction};

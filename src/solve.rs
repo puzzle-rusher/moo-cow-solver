@@ -9,6 +9,7 @@ use crate::models::batch_auction_model::OrderModel;
 use crate::models::batch_auction_model::SettledBatchAuctionModel;
 use crate::models::batch_auction_model::TokenAmount;
 use crate::models::batch_auction_model::{BatchAuctionModel, TokenInfoModel};
+use crate::models::settlement_contract_data::Order;
 use crate::slippage::RelativeSlippage;
 use crate::slippage::SlippageCalculator;
 use crate::slippage::SlippageContext;
@@ -16,7 +17,6 @@ use crate::solve::paraswap_solver::ParaswapSolver;
 use crate::token_list::get_buffer_tradable_token_list;
 use crate::token_list::BufferTradingTokenList;
 use crate::token_list::Token;
-use crate::settlement_contract_data::Order;
 use contracts::MooSettlementContract;
 
 use self::paraswap_solver::get_sub_trades_from_paraswap_price_response;
@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use contracts::ethcontract::Bytes;
 use hex::FromHex;
@@ -46,19 +47,25 @@ lazy_static! {
     pub static ref THOUSAND: U256 = U256::from_dec_str("1000").unwrap();
 }
 
+static ALREADY_EXECUTED: AtomicBool = AtomicBool::new(false);
 const FALLBACK_SLIPPAGE: RelativeSlippage = RelativeSlippage(0.001);
+// const MOO_SETTLEMENT_CONTRACT_ADDRESS: &str = "0xcEe38fB7D7c6ed6BABc18898BDEF67ED572Cc9D0";
+const MOO_SETTLEMENT_CONTRACT_ADDRESS: &str = "0x6d64978ec6Dc0b0175897F1b3F13BB9E6396C7e3";
 
 pub async fn solve(
     BatchAuctionModel {
         mut orders, mut tokens, ..
     }: BatchAuctionModel,
     slippage_calculator: SlippageCalculator,
+    web3: Web3<Http>,
 ) -> Result<SettledBatchAuctionModel> {
     let token_in = H160::from_str("0x6778ac35e1c9aca22a8d7d820577212a89544df9").unwrap();
     let token_out = H160::from_str("0xb4fbf271143f4fbf7b91a5ded31805e42b2208d6").unwrap();
-    // println!("{:?}", orders);
     println!("check");
     if let Some((index, order_model)) = orders.into_iter().find(|(_, order)| order.sell_token == token_in && order.buy_token == token_out) {
+        if ALREADY_EXECUTED.swap(true, Ordering::Relaxed) {
+            return Ok(Default::default());
+        }
         let amount_in = U256::from_str_radix("100000000000000000", 10).unwrap();
         let amount_out = U256::from_str_radix("1000000000000000000", 10).unwrap();
 
@@ -68,38 +75,40 @@ pub async fn solve(
         let executed_order = ExecutedOrderModel {
             exec_sell_amount: amount_in,
             exec_buy_amount: amount_out,
+            exec_fee_amount: order_model.allow_partial_fill.then_some(100.into()),
         };
         let mut calculated_prices = HashMap::new();
-        let decimals = tokens.get(&ref_token).unwrap().decimals.expect("decimals is zero");
+        let decimals = tokens.get(&ref_token).unwrap().decimals.unwrap_or(18);
         let ref_token_price = U256::exp10(decimals as usize);
         calculated_prices.insert(ref_token, ref_token_price);
         calculate_prices_for_order(&order_model, amount_in, amount_out, &mut calculated_prices)?;
 
-        let approval = ApprovalModel {
-            token: order_model.buy_token,
-            spender: Default::default(), // during hack
-            amount: order_model.buy_amount,
-        };
-        let http = Http::new("https://eth-goerli.public.blastapi.io").unwrap();
-        let web3 = Web3::new(http);
+        let contract = MooSettlementContract::at(&web3, H160::from_str(MOO_SETTLEMENT_CONTRACT_ADDRESS).unwrap());
+
         let settlement_contract_order = Order {
             token_in,
             amount_in,
             token_out,
             amount_out,
-            valid_to: U256::from(1747179215),
+            valid_to: U256::from(1747179217),
             maker: H160::from_str("d1f5c19d7330F333F28A5CF3F391Bf679aC55841").unwrap(),
-            uid: Bytes("0x1".as_bytes().to_owned()),
+            uid: Bytes([1].to_vec()),
         };
 
-        let signature = Vec::from_hex("3abc237d82f04aabe1317ff7b49b81c94cfa13f19658db60216bfde86085e41027150537c6ff482e73b30c0213c605e8267676a8e77791627c4a8744fdf8435d1c").unwrap();
+        let signature = Vec::from_hex("3bdf1180a463da09ffc18d45937e66767cb76044b85a6108751796c8ab8a01130f5c5dad1d5282a1f5880bbc6ddb8fe194e427523a5ea32ddf1d858a23113ffd1c").unwrap();
         let interaction = MooSettlementInteraction {
             order: settlement_contract_order,
             signature: signature.into(),
-            moo: MooSettlementContract::deployed(&web3).await.unwrap(),
+            moo: contract,
         }.encode();
 
         let encoded = interaction.first().unwrap();
+
+        let approval = ApprovalModel {
+            token: token_in,
+            spender: encoded.0,
+            amount: amount_in,
+        };
         let interaction_data = InteractionData {
             target: encoded.0, // during hack
             value: U256::zero(),
@@ -122,7 +131,7 @@ pub async fn solve(
                 orders: HashMap::from([(index, executed_order)]),
                 amms: Default::default(),
                 ref_token: Some(ref_token),
-                prices: Default::default(),
+                prices: calculated_prices,
                 approvals: vec![approval],
                 interaction_data: vec![interaction_data],
             }
